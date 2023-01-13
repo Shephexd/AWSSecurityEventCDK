@@ -1,4 +1,5 @@
 from aws_cdk import (
+    aws_ec2,
     aws_events,
     aws_lambda,
     aws_securityhub,
@@ -20,8 +21,8 @@ class SecurityEventNotificationStack(Stack):
                                      description="The name of the Amazon S3 bucket where uploaded files will be stored.")
 
         self.init_security_hub()
-        sns_notification = SNSEmailForSecurityEvent(scope=self, construct_id="SNSForSecurityEvent",
-                                                    email=email_address.value_as_string)
+        sns_notification = SNSEmailForSecurityEventStack(scope=self, construct_id="SNSForSecurityEvent",
+                                                         email=email_address.value_as_string)
         email_parser = self.create_lambda_email_parser(sns_topic=sns_notification.topic)
         event_bridge = EventBridgeForSecurityStack(scope=self,
                                                    construct_id="EventBridgeForSecurityStack", parser=email_parser)
@@ -64,11 +65,11 @@ class EventBridgeForSecurityStack(NestedStack):
         return _rule
 
 
-class SNSEmailForSecurityEvent(NestedStack):
+class SNSEmailForSecurityEventStack(NestedStack):
     def __init__(self, scope: Construct, construct_id: str, email: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         self.topic = aws_sns.Topic(self, id="security-alert-event")
-        self.email_subscription =\
+        self.email_subscription = \
             aws_sns.Subscription(self,
                                  "security-event-subscription",
                                  topic=self.topic,
