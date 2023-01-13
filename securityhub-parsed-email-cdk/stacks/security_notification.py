@@ -26,6 +26,7 @@ class SecurityEventNotificationStack(Stack):
         email_parser = self.create_lambda_email_parser(sns_topic=sns_notification.topic)
         event_bridge = EventBridgeForSecurityStack(scope=self,
                                                    construct_id="EventBridgeForSecurityStack", parser=email_parser)
+        VPCSetupStack(scope=self, construct_id="DemoVPC")
 
     def init_security_hub(self):
         security_hub = aws_securityhub.CfnHub(self, "MyCfnHub")
@@ -75,3 +76,31 @@ class SNSEmailForSecurityEventStack(NestedStack):
                                  topic=self.topic,
                                  endpoint=email,
                                  protocol=aws_sns.SubscriptionProtocol.EMAIL)
+
+
+class VPCSetupStack(NestedStack):
+    def __init__(self, scope: Construct, construct_id: str, **kwargs):
+        super().__init__(scope, construct_id, **kwargs)
+        self.subnets = {
+            "WEB": aws_ec2.SubnetConfiguration(
+                subnet_type=aws_ec2.SubnetType.PUBLIC,
+                name="Ingress",
+                cidr_mask=24
+            ),
+            "WAS": aws_ec2.SubnetConfiguration(
+                cidr_mask=24,
+                name="Application",
+                subnet_type=aws_ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ),
+            "DB": aws_ec2.SubnetConfiguration(
+                cidr_mask=28,
+                name="Database",
+                subnet_type=aws_ec2.SubnetType.PRIVATE_ISOLATED,
+            )
+        }
+
+        self.vpc = aws_ec2.Vpc(self, "DemoVPC",
+                               ip_addresses=aws_ec2.IpAddresses.cidr("10.0.0.0/21"),
+                               max_azs=3,
+                               subnet_configuration=list(self.subnets.values())
+                               )
