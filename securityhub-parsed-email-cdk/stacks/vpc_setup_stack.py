@@ -41,7 +41,7 @@ class VPCSetupStack(Stack):
             subnet_type=ec2.SubnetType.PUBLIC, name="PublicSubnet", cidr_mask=25
         )
         private_subnet = ec2.SubnetConfiguration(
-            subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
+            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
             name="PrivateSubnet",
             cidr_mask=25,
         )
@@ -67,7 +67,13 @@ class VPCSetupStack(Stack):
 
 class WebAppStack(NestedStack):
     def __init__(
-        self, scope: Construct, construct_id: str, vpc: ec2.Vpc, tags: dict, prefix="", **kwargs
+        self,
+        scope: Construct,
+        construct_id: str,
+        vpc: ec2.Vpc,
+        tags: dict,
+        prefix="",
+        **kwargs
     ):
         super().__init__(scope, construct_id, **kwargs)
         self.vpc = vpc
@@ -115,7 +121,6 @@ class WebAppStack(NestedStack):
         webapp_sg = self.set_web_app_security_group(
             vpc=self.vpc, alb_security_group=alb_sg, prefix=prefix
         )
-
         launch_template = self.init_launch_template(
             webapp_security_group=webapp_sg, tags=tags, prefix=prefix
         )
@@ -145,9 +150,7 @@ class WebAppStack(NestedStack):
     def set_web_app_security_group(self, vpc: ec2.Vpc, alb_security_group, prefix=""):
         web_sg = ec2.SecurityGroup(self, "WEB-APP-SG", vpc=vpc, allow_all_outbound=True)
         web_sg.add_ingress_rule(alb_security_group, connection=ec2.Port.tcp(80))
-        web_sg.add_ingress_rule(
-            ec2.Peer.ipv4(vpc.vpc_cidr_block), connection=ec2.Port.tcp(443)
-        )
+        web_sg.add_ingress_rule(ec2.Peer.ipv4(vpc.vpc_cidr_block), connection=ec2.Port.tcp(443))
         return web_sg
 
     def init_launch_template(
@@ -158,17 +161,20 @@ class WebAppStack(NestedStack):
         ssm_role = iam.Role(
             self,
             prefix + "WebInstanceRole",
+            role_name=prefix + "WebInstanceRole",
             assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name(
                     "AmazonSSMManagedInstanceCore"
                 ),
                 iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "AmazonS3ReadOnlyAccess"
+                    "AmazonS3FullAccess"
                 ),
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "CloudWatchAgentServerPolicy"
+                )
             ],
         )
-
         launch_template = ec2.LaunchTemplate(
             self,
             prefix + "Instance",
@@ -197,14 +203,18 @@ class WebAppStack(NestedStack):
             max_capacity=4,  # max 4 EC2 running in case of workload increase
             desired_capacity=2,  # always keep two EC2 running (one per AZ)
             vpc=vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             health_check=autos.HealthCheck.ec2(grace=cdk.Duration.seconds(120)),
         )
         return auto_scaling_group
 
     def init_alb(self, vpc, alb_sg, auto_scaling_group, prefix=""):
         alb = elbv2.ApplicationLoadBalancer(
-            self, prefix + "ALB", vpc=vpc, internet_facing=True, security_group=alb_sg
+            self,
+            prefix + "ALB",
+            vpc=vpc,
+            internet_facing=True,
+            security_group=alb_sg
         )
         listener = alb.add_listener(prefix + "Listener", port=80, open=True)
         listener.add_targets(prefix + "Fleet", port=80, targets=[auto_scaling_group])
